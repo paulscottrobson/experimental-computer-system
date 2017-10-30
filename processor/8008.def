@@ -1,0 +1,135 @@
+// *************************************************************************************************
+// *************************************************************************************************
+//
+//									8008 Definition for porting
+//
+// *************************************************************************************************
+// *************************************************************************************************
+//
+//	@C1 			Old conditions (FC,FZ,FS,FP,TC,TZ,TS,TP)
+//	@C2 			New conditions (NC,NZ,P,PO,C,Z,M,PE)
+//	@D 				ABCDEHLM on bits 3-5
+//	@FETCH16 		Shortcut for Fetch 13 bit address into $T16
+//	@HL 			Shortcut for ((($H << 8)|$L) & 0x3FFF)
+//	@IOA	 		IO Address from bits 1-5 as 2 hex digits
+//	@PULLPC 		Code to Pull PC
+//	@PUSHPC 		Code to Push PC
+//	@R 				ABCDEHLM on lowest 3 bits.
+//	@R1 			0-7 bits 3-5
+//	@R2 			00-38 bits 3-5
+//	@T 				Code test for @C1/@C2
+//
+//	read(a)			Memory access	
+//	write(a,d)
+//	fetch()
+//	input(p) 		I/O Access
+//	output(p,d)
+//	add(b,c)		8 bit addition, sets carry as side effect.
+//	sub(b,c)		8 bit subtraction, sets borrow as side effect.
+//	parityeven(a)	is 8 bit value even parity.
+//
+//	A,B,C,D,E,H,L 	Normal registers
+//	PC 				Program Counter
+//	CARRY 			Carry
+//	PSZVALUE 		Current value to evaluate P,S,Z status bits.
+// 	SPTR,STACK[8]	Mimics 8008 stack, quicker for slow processors.
+//	T16 			Temporary 16 byte value
+//	CYCLES 			Cycle (up) count
+//	HALT 			Halt flag
+//	INTREQ 			Set to 1 if interrupt has been requested and is enabled.
+//
+// *************************************************************************************************
+//									Index Register instructions
+// *************************************************************************************************
+
+C0-C6 	5 	"LA@R:MOV A,@R" 		$A = $@R
+C8-CE 	5 	"LB@R:MOV B,@R" 		$B = $@R
+D0-D6 	5 	"LC@R:MOV C,@R" 		$C = $@R
+D8-DE 	5 	"LD@R:MOV D,@R" 		$D = $@R
+E0-E6 	5 	"LE@R:MOV E,@R" 		$E = $@R
+E8-EE 	5 	"LH@R:MOV H,@R" 		$H = $@R
+F0-F6 	5 	"LL@R:MOV L,@R" 		$L = $@R
+
+C7-F7,8	8 	"L@DM:MOV @D,M"			$@D = $read(@HL)
+
+F8-FE 	7 	"LM@R:MOV M,@R"			$write(@HL,$@R)
+
+08-30,8 5 	"IN@R:INR @R" 			$PSZVALUE = $A = ($@R+1) & 255
+09-31,8 5 	"DC@R:DCR @R" 			$PSZVALUE = $A = ($@R-1) & 255
+
+// *************************************************************************************************
+//								   Accumulator Group Instructions
+// *************************************************************************************************
+
+80-86 	5 	"AD@R:ADD @R"			$PSZVALUE = $A = $add($@R,0)
+87 		8 	"ADM:ADD M"				$PSZVALUE = $A = $add($read(@HL),0)
+04 		8 	"ADI %1:ADI %1"			$PSZVALUE = $A = $add($fetch(),0)
+
+88-8E 	5 	"AC@R:ADC @R"			$PSZVALUE = $A = $add($@R,$CARRY)
+8F 		8 	"ACM:ADC M"				$PSZVALUE = $A = $add($read(@HL),$CARRY)
+0C 		8 	"ACI %1:ACI %1"			$PSZVALUE = $A = $add($fetch(),$CARRY)
+
+90-96 	5 	"SU@R:SUB @R"			$PSZVALUE = $A = $sub($@R,0)
+97 		8 	"SUM:SUB M"				$PSZVALUE = $A = $sub($read(@HL),0)
+14 		8 	"SUI %1:SUI %1"			$PSZVALUE = $A = $sub($fetch(),0)
+
+98-9E 	5 	"SB@R:SBB @R"			$PSZVALUE = $A = $sub($@R,$CARRY)
+9F 		8 	"SBM:SBB M"				$PSZVALUE = $A = $sub($read(@HL),$CARRY)
+1C 		8 	"SBI %1:SBI %1"			$PSZVALUE = $A = $sub($fetch(),$CARRY)
+
+A0-A6 	5	"AN@R:ANA @R"			$PSZVALUE = $A = $A & $@R;$CARRY = 0
+A7 		8 	"ANM:ANA M"				$PSZVALUE = $A = $A & $read(@HL);$CARRY = 0
+24 		8 	"ANI %1:ANI %1"			$PSZVALUE = $A = $A & $fetch();$CARRY = 0
+
+A8-AE 	5	"XR@R:XRA @R"			$PSZVALUE = $A = $A ^ $@R;$CARRY = 0
+AF 		8 	"XRM:XRA M"				$PSZVALUE = $A = $A ^ $read(@HL);$CARRY = 0
+2C 		8 	"XRI %1:XRI %1"			$PSZVALUE = $A = $A ^ $fetch();$CARRY = 0
+
+B0-B6 	5	"OR@R:ORA @R"			$PSZVALUE = $A = $A | $@R;$CARRY = 0
+B7 		8 	"ORM:ORA M"				$PSZVALUE = $A = $A | $read(@HL);$CARRY = 0
+34 		8 	"ORI %1:ORI %1"			$PSZVALUE = $A = $A | $fetch();$CARRY = 0
+
+B8-BE 	5 	"CP@R:CMP @R"			$PSZVALUE = $sub($@R,0)
+BF 		8 	"CPM:CMP M"				$PSZVALUE = $sub($read(@HL),0)
+3C 		8 	"CPI %1:CPI %1"			$PSZVALUE = $sub($fetch(),0)
+
+02 		5 	"RLC:RLC"				$CARRY = ($A >> 7) & 1;$A = (($A << 1) | $CARRY) & 0xFF
+
+0A 		5 	"RRC:RRC"				$CARRY = $A & 1;$A = ($A >> 1) | ($CARRY << 7)
+
+12 		5 	"RAL:RAL"				$T16 = ($A << 1)|$CARRY;$CARRY = ($T16 >> 8) & 1 ;$A = $T16 & 0xFF
+
+1A 		5 	"RAR:RAR"				$T16 = ($CARRY << 8)|$A;$CARRY = $A & 1;$A = ($T16 >> 1) & 0xFF
+
+// *************************************************************************************************
+//							Program Counter and stack control instructions
+// *************************************************************************************************
+
+44-7C,8 11 	"JMP %2:JMP %2"			@FETCH16;$PC = $T16
+
+40-78,8 10 	"J@C1 %2:J@C2 %2"		@FETCH16;if (@T) { $PC = $T16; }
+
+46-7E,8 11 	"CAL %2:CAL %2"			@FETCH16;@PUSHPC;$PC = $T16
+
+42-7A,8 10 	"C@C1 %2:C@C2 %2"		@FETCH16;if (@T) { @PUSHPC;$PC = $T16; }
+
+07-3F,8 5 	"RET:RET"				@PULLPC
+
+03-3B,8 5 	"R@C1:R@C2"				if (@T) { @PULLPC;}
+
+05-3D,8	5 	"RS@R1:RST @R2" 		@PUSHPC;$PC = 0x@R2
+
+// *************************************************************************************************
+//										Input/Output Instructions
+// *************************************************************************************************
+
+41-4F,2 8	"INP @IOA:IN @IOA" 		$A = $input(0x@IOA)
+
+51-7F,2 6	"OUT @IOA:OUT @IOA"		$output(0x@IOA,$A)
+
+// *************************************************************************************************
+//											Machine Instruction
+// *************************************************************************************************
+
+00-01	4	"HLT:HALT"				$HALT = 1
+FF 		4	"HLT:HALT"				$HALT = 1
