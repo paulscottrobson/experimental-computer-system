@@ -22,8 +22,9 @@
 static BYTE8 ramMemory[RAMSIZE];													// RAM memory
 static BYTE8 interruptEnabled,interruptRequest;
 
-static BYTE8 A,B,C,D,E,H,L,HALT,CARRY,PSZVALUE,SPTR;
-static WORD16 CYCLES,T16,PC,STACK[8];
+static BYTE8 A,B,C,D,E,H,L,HALT,CARRY,PSZV,STACKIX,MBR;
+static WORD16 MAR,CYCLES,T16,STACK[8];
+
 // *******************************************************************************************************************************
 //													Memory read and write macros.
 // *******************************************************************************************************************************
@@ -31,19 +32,9 @@ static WORD16 CYCLES,T16,PC,STACK[8];
 #define READ(a) 	ramMemory[(a) & MEMORYMASK]
 #define WRITE(a,d) 	ramMemory[(a) & MEMORYMASK] = (d)
 
-#define FETCH() 	fetch() 
-
-static BYTE8 fetch() {
-	BYTE8 b = READ(PC);
-	PC = (PC + 1) & 0x3FFF;
-	return b;
-}
 // *******************************************************************************************************************************
 //														I/O Port connections
 // *******************************************************************************************************************************
-
-#define INPUT(p) 		(0xFF)
-#define OUTPUT(p,d) 	{}
 
 // *******************************************************************************************************************************
 //													  Port interfaces
@@ -51,7 +42,7 @@ static BYTE8 fetch() {
 
 void CPUReset(void) {
 	A = B = C = D = E = H = L = HALT = 0;
-	CARRY = PSZVALUE = PC = CYCLES = SPTR = 0;
+	CARRY = PSZV = PC = CYCLES = STACKIX = 0;
 	interruptRequest = 0;interruptEnabled = 0;
 	HWIReset();
 
@@ -67,19 +58,7 @@ void CPUReset(void) {
 //										 Arithmetic
 // *******************************************************************************************************************************
 
-static BYTE8 add8Bit(BYTE8 operand,BYTE8 carry) {
-	WORD16 r = A + operand + carry;
-	CARRY = (r & 0x100) ? 1 : 0;
-	return (r & 0xFF);
-}
-
-static BYTE8 sub8Bit(BYTE8 operand,BYTE8 borrow) {
-	WORD16 r = A - operand - borrow;
-	CARRY = (r & 0x100) ? 1 : 0;
-	return (r & 0xFF);	
-}
-
-static BYTE8 isParityEven(BYTE8 n) {
+static BYTE8 parityeven(BYTE8 n) {
 	BYTE8 parity = 0;
 	while (n != 0) {
 		if ((n & 1) != 0) parity++;
@@ -87,10 +66,6 @@ static BYTE8 isParityEven(BYTE8 n) {
 	}
 	return (parity & 1) == 0;
 }
-
-#define ADD(b,c) 		add8Bit(b,c)
-#define SUB(b,c) 		sub8Bit(b,c)
-#define PARITYEVEN(a) 	isParityEven(a)
 
 
 // *******************************************************************************************************************************
@@ -136,9 +111,9 @@ BYTE8 CPUExecuteInstruction(void) {
 // *******************************************************************************************************************************
 
 WORD16 CPUGetStepOverBreakpoint(void) {
-	BYTE8 opcode = CPURead(PC);														// Read opcode.
-	if ((opcode & 0xC7) == 0x07) return ((PC+1) & 0x3FFF);							// RST xx
-	if ((opcode & 0xC3) == 0x42) return ((PC+3) & 0x3FFF);							// CALL xxxx (various calls)
+	BYTE8 opcode = CPURead(STACK[STACKIX]);											// Read opcode.
+	if ((opcode & 0xC7) == 0x07) return ((STACK[STACKIX]+1) & 0x3FFF);				// RST xx
+	if ((opcode & 0xC3) == 0x42) return ((STACK[STACKIX]+3) & 0x3FFF);				// CALL xxxx (various calls)
 	return 0xFFFF;
 }
 
@@ -153,7 +128,7 @@ BYTE8 CPUExecute(WORD16 break1,WORD16 break2) {
 		if (rate != 0) {															// If end of frame, return rate.
 			return rate;													
 		}
-		if (PC == break1 || PC == break2) return 0;
+		if (STACK[STACKIX] == break1 || STACK[STACKIX] == break2) return 0;
 	} 																				// Until hit a breakpoint or HLT.
 }
 
@@ -183,16 +158,12 @@ static CPUSTATUS s;																	// Status area
 
 CPUSTATUS *CPUGetStatus(void) {
 	s.a = A;s.b = B;s.c = C;s.d = D;s.e = E;s.h = H;s.l = L;						// 8 bit registers
-	s.zFlag = (PSZVALUE == 0);s.cFlag = (CARRY != 0);s.hFlag = (HALT != 0);			// Flags
-	s.pFlag = (isParityEven(PSZVALUE) == 0);s.sFlag = ((PSZVALUE & 0x80) != 0);
+	s.zFlag = (PSZV == 0);s.cFlag = (CARRY != 0);s.hFlag = (HALT != 0);				// Flags
+	s.pFlag = (parityeven(PSZV) == 0);s.sFlag = ((PSZV & 0x80) != 0);
 	s.interruptEnabled = interruptEnabled;
 	s.cycles = CYCLES;																// Number of cycles.
-	s.pc = PC;																		// Save PC.
+	s.pc = STACK[STACKIX];
 	s.hl = (s.h << 8) | s.l;s.m = CPURead(s.hl & 0x3FFF);							// Helpers
-	s.stackDepth = SPTR;															// Copy stack.
-	for (int i = 0;i < SPTR;i++) {
-		s.stack[SPTR-1-i] = STACK[i];
-	}
 	return &s;
 }
 #endif
