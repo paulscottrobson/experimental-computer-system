@@ -1,135 +1,242 @@
-// *************************************************************************************************
-// *************************************************************************************************
-//
-//									8008 Definition for porting
-//
-// *************************************************************************************************
-// *************************************************************************************************
-//
-//	@C1 			Old conditions (FC,FZ,FS,FP,TC,TZ,TS,TP)
-//	@C2 			New conditions (NC,NZ,P,PO,C,Z,M,PE)
-//	@D 				ABCDEHLM on bits 3-5
-//	@FETCH16 		Shortcut for Fetch 13 bit address into $T16
-//	@HL 			Shortcut for ((($H << 8)|$L) & 0x3FFF)
-//	@IOA	 		IO Address from bits 1-5 as 2 hex digits
-//	@PULLPC 		Code to Pull PC
-//	@PUSHPC 		Code to Push PC
-//	@R 				ABCDEHLM on lowest 3 bits.
-//	@R1 			0-7 bits 3-5
-//	@R2 			00-38 bits 3-5
-//	@T 				Code test for @C1/@C2
-//
-//	read(a)			Memory access	
-//	write(a,d)
-//	fetch()
-//	input(p) 		I/O Access
-//	output(p,d)
-//	add(b,c)		8 bit addition, sets carry as side effect.
-//	sub(b,c)		8 bit subtraction, sets borrow as side effect.
-//	parityeven(a)	is 8 bit value even parity.
-//
-//	A,B,C,D,E,H,L 	Normal registers
-//	PC 				Program Counter
-//	CARRY 			Carry
-//	PSZVALUE 		Current value to evaluate P,S,Z status bits.
-// 	SPTR,STACK[8]	Mimics 8008 stack, quicker for slow processors.
-//	T16 			Temporary 16 byte value
-//	CYCLES 			Cycle (up) count
-//	HALT 			Halt flag
-//	INTREQ 			Set to 1 if interrupt has been requested and is enabled.
+//	@r 		ABCDEHLM on (opcode / step mod 8)
+//	@hl		HL converted to 14 bit address
+//	@read 	Read $MAR -> $MBR
+//	@write 	Write $MBR to $MAR
+//	@fetch 	Fetch to $MBR
+//	@add 	calculate $MBR,$CARRY = $A + $MBR + $CARRY (uses $MAR)
 //
 // *************************************************************************************************
-//									Index Register instructions
+//									Index Register Instructions
 // *************************************************************************************************
 
-C0-C6 	5 	"LA@R:MOV A,@R" 		$A = $@R
-C8-CE 	5 	"LB@R:MOV B,@R" 		$B = $@R
-D0-D6 	5 	"LC@R:MOV C,@R" 		$C = $@R
-D8-DE 	5 	"LD@R:MOV D,@R" 		$D = $@R
-E0-E6 	5 	"LE@R:MOV E,@R" 		$E = $@R
-E8-EE 	5 	"LH@R:MOV H,@R" 		$H = $@R
-F0-F6 	5 	"LL@R:MOV L,@R" 		$L = $@R
+C0-C6 	5	"mov a,@r"
+	$a = $@r
 
-C7-F7,8	8 	"L@DM:MOV @D,M"			$@D = $read(@HL)
+C8-CE 	5	"mov b,@r"
+	$b = $@r
 
-F8-FE 	7 	"LM@R:MOV M,@R"			$write(@HL,$@R)
+D0-D6 	5	"mov c,@r"
+	$c = $@r
 
-08-30,8 5 	"IN@R:INR @R" 			$PSZVALUE = $A = ($@R+1) & 255
-09-31,8 5 	"DC@R:DCR @R" 			$PSZVALUE = $A = ($@R-1) & 255
+D8-DE 	5	"mov d,@r"
+	$d = $@r
 
-// *************************************************************************************************
-//								   Accumulator Group Instructions
-// *************************************************************************************************
+E0-E6 	5	"mov e,@r"
+	$e = $@r
 
-80-86 	5 	"AD@R:ADD @R"			$PSZVALUE = $A = $add($@R,0)
-87 		8 	"ADM:ADD M"				$PSZVALUE = $A = $add($read(@HL),0)
-04 		8 	"ADI %1:ADI %1"			$PSZVALUE = $A = $add($fetch(),0)
+E8-EE 	5	"mov h,@r"
+	$h = $@r
 
-88-8E 	5 	"AC@R:ADC @R"			$PSZVALUE = $A = $add($@R,$CARRY)
-8F 		8 	"ACM:ADC M"				$PSZVALUE = $A = $add($read(@HL),$CARRY)
-0C 		8 	"ACI %1:ACI %1"			$PSZVALUE = $A = $add($fetch(),$CARRY)
+F0-F6 	5	"mov l,@r"
+	$l = $@r
 
-90-96 	5 	"SU@R:SUB @R"			$PSZVALUE = $A = $sub($@R,0)
-97 		8 	"SUM:SUB M"				$PSZVALUE = $A = $sub($read(@HL),0)
-14 		8 	"SUI %1:SUI %1"			$PSZVALUE = $A = $sub($fetch(),0)
+C7-F7,8	8 	"mov @r,m"
+	$mar = @hl
+	@read
+	$@r = $mbr
 
-98-9E 	5 	"SB@R:SBB @R"			$PSZVALUE = $A = $sub($@R,$CARRY)
-9F 		8 	"SBM:SBB M"				$PSZVALUE = $A = $sub($read(@HL),$CARRY)
-1C 		8 	"SBI %1:SBI %1"			$PSZVALUE = $A = $sub($fetch(),$CARRY)
+F8-FE	7 	"mov m,@r"
+	$mar = @hl
+	$mbr = $@r
+	@write
 
-A0-A6 	5	"AN@R:ANA @R"			$PSZVALUE = $A = $A & $@R;$CARRY = 0
-A7 		8 	"ANM:ANA M"				$PSZVALUE = $A = $A & $read(@HL);$CARRY = 0
-24 		8 	"ANI %1:ANI %1"			$PSZVALUE = $A = $A & $fetch();$CARRY = 0
+06-36,8 8 	"mvi @r,#%1"	
+	@fetch
+	$@r = $mbr
 
-A8-AE 	5	"XR@R:XRA @R"			$PSZVALUE = $A = $A ^ $@R;$CARRY = 0
-AF 		8 	"XRM:XRA M"				$PSZVALUE = $A = $A ^ $read(@HL);$CARRY = 0
-2C 		8 	"XRI %1:XRI %1"			$PSZVALUE = $A = $A ^ $fetch();$CARRY = 0
+3E		9 	"mvi m,#%1"
+	@fetch
+	$mar = @hl
+	@write
 
-B0-B6 	5	"OR@R:ORA @R"			$PSZVALUE = $A = $A | $@R;$CARRY = 0
-B7 		8 	"ORM:ORA M"				$PSZVALUE = $A = $A | $read(@HL);$CARRY = 0
-34 		8 	"ORI %1:ORI %1"			$PSZVALUE = $A = $A | $fetch();$CARRY = 0
+08-30,8	5 	"inr @r"
+	$@r = ($@r + 1) & 0xFF
+	$pszv = $@r
 
-B8-BE 	5 	"CP@R:CMP @R"			$PSZVALUE = $sub($@R,0)
-BF 		8 	"CPM:CMP M"				$PSZVALUE = $sub($read(@HL),0)
-3C 		8 	"CPI %1:CPI %1"			$PSZVALUE = $sub($fetch(),0)
-
-02 		5 	"RLC:RLC"				$CARRY = ($A >> 7) & 1;$A = (($A << 1) | $CARRY) & 0xFF
-
-0A 		5 	"RRC:RRC"				$CARRY = $A & 1;$A = ($A >> 1) | ($CARRY << 7)
-
-12 		5 	"RAL:RAL"				$T16 = ($A << 1)|$CARRY;$CARRY = ($T16 >> 8) & 1 ;$A = $T16 & 0xFF
-
-1A 		5 	"RAR:RAR"				$T16 = ($CARRY << 8)|$A;$CARRY = $A & 1;$A = ($T16 >> 1) & 0xFF
+09-31,8	5 	"dcr @r"
+	$@r = ($@r + 0xFF) & 0xFF
+	$pszv = $@r
 
 // *************************************************************************************************
-//							Program Counter and stack control instructions
+//								Accumulator Group Instructions
 // *************************************************************************************************
 
-44-7C,8 11 	"JMP %2:JMP %2"			@FETCH16;$PC = $T16
+80-86 	5 	"add @r"
+	$carry = 0
+	$mbr = $r
+	@add
+	$a = $mbr ; $pszv = $mbr
 
-40-78,8 10 	"J@C1 %2:J@C2 %2"		@FETCH16;if (@T) { $PC = $T16; }
+87 		8 	"add m"
+	$carry = 0
+	$mar = @hl
+	@read
+	@add
+	$a = $mbr ; $pszv = $mbr
 
-46-7E,8 11 	"CAL %2:CAL %2"			@FETCH16;@PUSHPC;$PC = $T16
+04 		8 	"adi #%1"
+	$carry = 0
+	@fetch
+	@add
+	$a = $mbr ; $pszv = $mbr
 
-42-7A,8 10 	"C@C1 %2:C@C2 %2"		@FETCH16;if (@T) { @PUSHPC;$PC = $T16; }
+// ----------------------------------------------------------------------------------------------------------
 
-07-3F,8 5 	"RET:RET"				@PULLPC
+88-8E 	5 	"adc @r"
+	$mbr = $r
+	@add
+	$a = $mbr ; $pszv = $mbr
 
-03-3B,8 5 	"R@C1:R@C2"				if (@T) { @PULLPC;}
+8F 		8 	"adc m"
+	$mar = @hl
+	@read
+	@add
+	$a = $mbr ; $pszv = $mbr
 
-05-3D,8	5 	"RS@R1:RST @R2" 		@PUSHPC;$PC = 0x@R2
+0C 		8 	"aci #%1"
+	$carry = 0
+	@fetch
+	@add
+	$a = $mbr ; $pszv = $mbr
+
+// ----------------------------------------------------------------------------------------------------------
+
+90-96 	5 	"sub @r"
+	$carry = 1
+	$mbr = $r ^ 0xFF
+	@add
+	$a = $mbr ; $pszv = $mbr
+
+87 		8 	"sub m"
+	$carry = 1
+	$mar = @hl
+	@read
+	$mbr = $mbr ^ 0xFF
+	@add
+	$a = $mbr ; $pszv = $mbr
+
+14 		8 	"sui #%1"
+	$carry = 1
+	@fetch
+	@add
+	$mbr = $mbr ^ 0xFF
+	$a = $mbr ; $pszv = $mbr
+
+// ----------------------------------------------------------------------------------------------------------
+
+98-9E 	5 	"sbb @r"
+	$mbr = $r ^ 0xFF
+	@add
+	$a = $mbr ; $pszv = $mbr
+
+9F 		8 	"sbb m"
+	$mar = @hl
+	@read
+	$mbr = $mbr ^ 0xFF
+	@add
+	$a = $mbr ; $pszv = $mbr
+
+1C 		8 	"sbi #%1"
+	@fetch
+	@add
+	$mbr = $mbr ^ 0xFF
+	$a = $mbr ; $pszv = $mbr
+
+// ----------------------------------------------------------------------------------------------------------
+
+A0-A6 	5 	"and @r"
+	$carry = 0	
+	$a = $a & $@r ; $pszv = $a
+
+A7 		8 	"and m"
+	$carry = 0
+	$mar = @hl
+	@read
+	$a = $a & $mbr ; $pszv = $a
+
+24 		8 	"ani #%1"
+	$carry = 0
+	@fetch
+	$a = $a & $mbr ; $pszv = $a
+
+// ----------------------------------------------------------------------------------------------------------
+
+A8-AE 	5 	"xor @r"
+	$carry = 0	
+	$a = $a ^ $@r ; $pszv = $a
+
+AF 		8 	"xor m"
+	$carry = 0
+	$mar = @hl
+	@read
+	$a = $a ^ $mbr ; $pszv = $a
+
+2C 		8 	"xri #%1"
+	$carry = 0
+	@fetch
+	$a = $a ^ $mbr ; $pszv = $a
+
+// ----------------------------------------------------------------------------------------------------------
+
+B0-B6 	5 	"or @r"
+	$carry = 0	
+	$a = $a | $@r ; $pszv = $a
+
+B7 		8 	"or m"
+	$carry = 0
+	$mar = @hl
+	@read
+	$a = $a | $mbr ; $pszv = $a
+
+34 		8 	"ori #%1"
+	$carry = 0
+	@fetch
+	$a = $a | $mbr ; $pszv = $a
+
+// ----------------------------------------------------------------------------------------------------------
+
+B8-BE 	5 	"cmp @r"
+	$carry = 1
+	$mbr = $r ^ 0xFF
+	@add
+	$pszv = $mbr
+
+BF 		8 	"cmp m"
+	$carry = 1
+	$mar = @hl
+	@read
+	$mbr = $mbr ^ 0xFF
+	@add
+	$pszv = $mbr
+
+3C 		8 	"cpi #%1"
+	$carry = 1
+	@fetch
+	@add
+	$mbr = $mbr ^ 0xFF
+	$pszv = $mbr
+
+// ----------------------------------------------------------------------------------------------------------
+
+
+02 		5 	"rlc"
+	$a = (($a << 1) | ($a >> 7)) & 0xFF
+	$carry = $a & 1
+
+0A 		5 	"rrc"
+	$carry = $a & 1
+	$a = ($a >> 1) | ($carry << 7)
+
+12 		5 	"ral"
+	$mar = ($a << 1) | $carry
+	$a = $mar & 0xFF
+	$carry = ($mar >> 8) & 1
+
+1A 		5 	"rar"
+	$mar = $a | ($carry << 8)
+	$a = ($mar >> 1) & 0xFF
+	$carry = $mar & 1
 
 // *************************************************************************************************
-//										Input/Output Instructions
+//						Program Counter and Stack Control Instructions
 // *************************************************************************************************
-
-41-4F,2 8	"INP @IOA:IN @IOA" 		$A = $input(0x@IOA)
-
-51-7F,2 6	"OUT @IOA:OUT @IOA"		$output(0x@IOA,$A)
-
-// *************************************************************************************************
-//											Machine Instruction
-// *************************************************************************************************
-
-00-01	4	"HLT:HALT"				$HALT = 1
-FF 		4	"HLT:HALT"				$HALT = 1
