@@ -22,7 +22,7 @@
 static BYTE8 ramMemory[RAMSIZE];													// RAM memory
 static BYTE8 interruptEnabled,interruptRequest;
 
-static BYTE8 A,B,C,D,E,H,L,HALT,CARRY,PSZV,STACKIX,MBR;
+static BYTE8 A,B,C,D,E,H,L,HALT,CARRY,PSZV,STIX,MBR;
 static WORD16 MAR,CYCLES,T16,STACK[8];
 
 // *******************************************************************************************************************************
@@ -32,9 +32,13 @@ static WORD16 MAR,CYCLES,T16,STACK[8];
 #define READ(a) 	ramMemory[(a) & MEMORYMASK]
 #define WRITE(a,d) 	ramMemory[(a) & MEMORYMASK] = (d)
 
+#define PCTR 		STACK[STIX]
+
 // *******************************************************************************************************************************
 //														I/O Port connections
 // *******************************************************************************************************************************
+
+#include "_8008_ports.h"
 
 // *******************************************************************************************************************************
 //													  Port interfaces
@@ -42,7 +46,7 @@ static WORD16 MAR,CYCLES,T16,STACK[8];
 
 void CPUReset(void) {
 	A = B = C = D = E = H = L = HALT = 0;
-	CARRY = PSZV = PC = CYCLES = STACKIX = 0;
+	CARRY = PSZV = CYCLES = STIX = 0;
 	interruptRequest = 0;interruptEnabled = 0;
 	HWIReset();
 
@@ -51,7 +55,9 @@ void CPUReset(void) {
 	WRITE(0x02,0x01);
 	WRITE(0x03,0x2C);
 	WRITE(0x04,0x44);
-	WRITE(0x180,0x07);
+	WRITE(0x180,0x46);
+	WRITE(0x181,0x82);
+	WRITE(0x182,0x03);
 }
 
 // *******************************************************************************************************************************
@@ -93,7 +99,9 @@ BYTE8 CPUExecuteInstruction(void) {
 		}
 	}
 	if (HALT == 0) {																// CPU is running (not halt)
-		switch(FETCH()) {															// Do the selected opcode and phase.
+		BYTE8 opcode = READ(PCTR);
+		PCTR = (PCTR+1) & 0x3FFF;
+		switch(opcode) {															// Do the selected opcode and phase.
 			#include "_8008_case.h"
 		}
 	}	
@@ -111,9 +119,9 @@ BYTE8 CPUExecuteInstruction(void) {
 // *******************************************************************************************************************************
 
 WORD16 CPUGetStepOverBreakpoint(void) {
-	BYTE8 opcode = CPURead(STACK[STACKIX]);											// Read opcode.
-	if ((opcode & 0xC7) == 0x07) return ((STACK[STACKIX]+1) & 0x3FFF);				// RST xx
-	if ((opcode & 0xC3) == 0x42) return ((STACK[STACKIX]+3) & 0x3FFF);				// CALL xxxx (various calls)
+	BYTE8 opcode = CPURead(PCTR);											// Read opcode.
+	if ((opcode & 0xC7) == 0x07) return ((PCTR+1) & 0x3FFF);				// RST xx
+	if ((opcode & 0xC3) == 0x42) return ((PCTR+3) & 0x3FFF);				// CALL xxxx (various calls)
 	return 0xFFFF;
 }
 
@@ -128,7 +136,7 @@ BYTE8 CPUExecute(WORD16 break1,WORD16 break2) {
 		if (rate != 0) {															// If end of frame, return rate.
 			return rate;													
 		}
-		if (STACK[STACKIX] == break1 || STACK[STACKIX] == break2) return 0;
+		if (PCTR == break1 || PCTR == break2) return 0;
 	} 																				// Until hit a breakpoint or HLT.
 }
 
@@ -162,8 +170,12 @@ CPUSTATUS *CPUGetStatus(void) {
 	s.pFlag = (parityeven(PSZV) == 0);s.sFlag = ((PSZV & 0x80) != 0);
 	s.interruptEnabled = interruptEnabled;
 	s.cycles = CYCLES;																// Number of cycles.
-	s.pc = STACK[STACKIX];
+	s.pc = PCTR;
 	s.hl = (s.h << 8) | s.l;s.m = CPURead(s.hl & 0x3FFF);							// Helpers
+	s.stackDepth = 0;
+	for (int s1 = 0;s1 < STIX;s1++) {
+		s.stack[s.stackDepth++] = STACK[STIX-s1-1	];
+	}
 	return &s;
 }
 #endif

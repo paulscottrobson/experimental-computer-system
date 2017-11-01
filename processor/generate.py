@@ -1,88 +1,83 @@
 import re,sys
 
-class Instruction:
-	def __init__(self,defn):
-		m = re.match("^([A-Fa-f0-9\-\,]+)\s+(\d+)\s+\"(.*?)\"\s+(.*)$",defn)
-		assert m is not None,"Bad line "+defn
-		range = m.group(1)
-		range = range+"-"+range if len(range) == 2 else range
-		range = range+",1" if len(range) == 5 else range
-		self.first = int(range[:2],16)
-		self.last = int(range[3:5],16)
-		self.step = int(range[-1],16)
-		self.cycles = int(m.group(2))
-		self.names = m.group(3).strip()
-		self.code = m.group(4).strip()
-		#print(defn,range,self.first,self.last,self.step,self.getOpcodes())
+def process(s,opcode,step,macros):
 
-	def getOpcodes(self):
-		return range(self.first,self.last+self.step,self.step)
+	cont = True
+	keys = macros.keys()
+	while cont:
+		cont = False
+		for k in keys:
+			if s.find(k) >= 0:
+				cont = True
+				s = s.replace(k,macros[k])
 
-	def getMnemonics(self,opcode,newType = True):
-		base = self.names.split(":")[1 if newType else 0]
-		base = self.process(base,opcode)
-		return base.lower()
+	s = s.replace("@p","{0:02x}".format(opcode/2%32))
+	s = s.replace("@r","abcdehlm"[step % 8])
+	s = s.replace("@v","{0:02x}".format(opcode & 0x38))
+	s = s.replace("@c","nc,nz,p,po,c,z,m,pe".split(",")[step % 8])
+	s = s.replace("@t",["$carry == 0","$pszv != 0","($pszv & 0x80) == 0","$parityeven($pszv) == 0", \
+						"$carry != 0","$pszv == 0","($pszv & 0x80) != 0","$parityeven($pszv) != 0"][step % 8])
 
-	def getCode(self,opcode,type = "C"):
-		base = self.process(self.code,opcode)
-		while base.find("$") >= 0:
-			m = re.search("(\$[A-Za-z]+)",base)
-			mWord = m.group(1)			
-			if type == "C":
-				base = base.replace(mWord,mWord[1:].upper())
-			elif type == "T":
-				base = base.replace(mWord,"this."+mWord[1:].lower())
-			else:
-				raise Exception()
+	return s
 
-		return base
+def cProcess(s,type,opcode = -1):
+	while s.find("$") >= 0:
+		p = s.find("$")
+		m = re.match("(\$[a-z0-9]+)(.)",s[p:])
+		repl = m.group(1)
+		if type == 'C':
+			s1 = repl[1:].upper() if m.group(2)[0] != '(' else repl[1:].lower()
+		else:
+			s1 = "this."+repl[1:].lower()
+		s = s[:p] + s1 + s[p+len(repl):]
+	return s 
 
-	def process(self,s,opc):
-		b03 = opc & 7
-		b35 = (opc >> 3) & 7
-		s = s.replace("@C1","FC,FZ,FS,FP,TC,TZ,TS,TP".split(",")[b35])
-		s = s.replace("@C2","NC,NZ,P,PO,C,Z,M,PE".split(",")[b35])
-		s = s.replace("@D","ABCDEHLM"[b35])
-		s = s.replace("@FETCH16","$T16 = $fetch();$T16 = ($T16 | ($fetch() << 8)) & 0x3FFF")
-		s = s.replace("@HL","((($H << 8)|$L) & 0x3FFF)")
-		s = s.replace("@IOA","{0:02X}".format((opc >> 1) & 0x1F))
-		s = s.replace("@PUSHPC","$STACK[$SPTR] = $PC;$SPTR = ($SPTR+1) & 7")
-		s = s.replace("@PULLPC","$SPTR = ($SPTR-1) & 7;$PC = $STACK[$SPTR];")
-		s = s.replace("@R1","{0:01X}".format(b35))
-		s = s.replace("@R2","{0:02X}".format(opc & 0x38))
-		s = s.replace("@R","ABCDEHLM"[b03])
-
-		tests = [ "$CARRY == 0","$PSZVALUE != 0","($PSZVALUE & 0x80) == 0","$parityeven($PSZVALUE) == 0", \
-				  "$CARRY != 0","$PSZVALUE == 0","($PSZVALUE & 0x80) != 0","$parityeven($PSZVALUE) != 0"]
-		s = s.replace("@T",tests[b35])
-		return s
+mnemonics = [ None ] * 256
+code = [ None ] * 256
+macros = {}
 
 src = open("8008.def").readlines()
 src = [x if x.find("//") < 0 else x[:x.find("//")] for x in src]
-src = [x.replace("\t"," ").strip() for x in src]
+src = [x.replace("\t"," ").rstrip() for x in src]
 src = [x for x in src if x != ""]
 
-instructions = [ None ] * 256
-for l in src:
-	instr = Instruction(l)
-	for opc in instr.getOpcodes():
-		assert instructions[opc] is None,"Duplicate opcode : "+l
-		instructions[opc] = instr
+for m in [x for x in src if x[0] == '@']:
+	p = m.find(" ")
+	macros[m[:p]] = m[p:].strip()
+
+for line in [x for x in src if x[0] != '@']:
+	m = re.match("^([0-9A-F\-\,]+)\s+(\d+)\s+\"(.*?)\"\s*(.*)$",line)
+	assert m is not None,line+" fails regex check"
+	srange = m.group(1)
+	srange = srange if len(srange) != 2 else srange+"-"+srange
+	srange = srange if len(srange) != 5 else srange+",1"
+	oStart = int(srange[:2],16)
+	oEnd = int(srange[3:5],16)
+	oStep = int(srange[-1])
+	oRange = [x for x in range(oStart,oEnd+1,oStep)]
+	for opcode in oRange:
+		xcode = "$cycles = $cycles + {0};{1};".format(m.group(2),m.group(4))
+		mnemonics[opcode] = m.group(3)
+		code[opcode] = xcode
+		mnemonics[opcode] = process(mnemonics[opcode],opcode,int(opcode/oStep),macros)
+		code[opcode] = process(code[opcode],opcode,int(opcode/oStep),macros).replace(";;",";")
+		#print(opcode,mnemonics[opcode],code[opcode])
+
+
 
 for i in range(0,256):
-	if instructions[i] is None:
-		instructions[i] = Instruction('{0:02x} 4 "nop:nop" ;'.format(i))
+	if mnemonics[i] is None:
+		mnemonics[i] = "db {0:02x}".format(i)
+		code[i] = ""
 
-oldList = ",".join(['"'+instructions[x].getMnemonics(x,False)+'"' for x in range(0,256)])		
-newList = ",".join(['"'+instructions[x].getMnemonics(x,True)+'"' for x in range(0,256)])
 
-open("_8008_oldMnemonics.h","w").write("{ "+oldList+ " };\n\n")
-open("_8008_newMnemonics.h","w").write("{ "+newList+ " };\n\n")
+mnemonicAll = ",".join(['"'+x+'"' for x in mnemonics])
+open("_8008_mnemonics.h","w").write("{ "+mnemonicAll+ " };\n\n")
 
 h = open("_8008_case.h","w")
 for i in range(0,256):
-	h.write("case 0x{0:02x}: /*** {1} ***/\n".format(i,instructions[i].getMnemonics(i)))
-	h.write("    "+instructions[i].getCode(i,"C")+";break;\n")
+	h.write("case 0x{0:02x}: /*** {1} ***/\n".format(i,mnemonics[i]))
+	h.write("    "+cProcess(code[i],'C')+";break;\n")
 h.close()
 
 h = open("_8008_opcodes.ts","w")
@@ -91,7 +86,13 @@ h.write("public getOpcodeList():Function[] {\n    ")
 h.write(",".join("opcode_{0:02x}()".format(n) for n in range(0,256)))
 h.write("\n}\n\n")
 for i in range(0,256):
-	h.write("private opcode_{0:02x}(): void {{ /*** {1} ***/\n".format(i,instructions[i].getMnemonics(i)))
-	h.write("    "+instructions[i].getCode(i,"T")+";\n}\n")
+	h.write("private opcode_{0:02x}(): void {{ /*** {1} ***/\n".format(i,mnemonics[i]))
+	h.write("    "+cProcess(code[i],'J')+";\n}\n")
 h.write("}\n")
 h.close()
+
+h = open("_8008_ports.h","w")
+for i in range(0,8):
+	h.write("#ifndef input{0:02x}\n#define input{0:02x}() (0)\n#endif\n".format(i))
+for i in range(8,32):
+	h.write("#ifndef output{0:02x}\n#define output{0:02x}(d) {{}}\n#endif\n".format(i))

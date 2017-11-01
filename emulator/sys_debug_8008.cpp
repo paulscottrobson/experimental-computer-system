@@ -18,7 +18,7 @@
 #include "debugger.h"
 
 static const char *_mnemonics[] = 
-#include "_8008_newMnemonics.h"														// 8008 new style mnemonics
+#include "_8008_mnemonics.h"														// 8008 new style mnemonics
 
 #define DBGC_ADDRESS 	(0x0F0)														// Colour scheme.
 #define DBGC_DATA 		(0x0FF)														// (Background is in main.c)
