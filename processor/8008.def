@@ -1,17 +1,13 @@
 // *************************************************************************************************
 //
 //	@c 		Conditions NC,NZ,P,PO,C,Z,M,PE
+//	@hl 	((h << 8)|l)
 //	@p 		Port number (2 digit hex value)
 //	@r 		ABCDEHLM on (opcode / step mod 8)
 //	@t 		tests associated with @c
 //	@v 		2 digit hex value RST vector
 //
 // *************************************************************************************************
-
-@hl 	(($h << 8) | $l)												
-@read 	$mbr = READ($mar)
-@write 	WRITE($mbr,$mar)
-@fetch 	$mar = $stack[$stix];$stack[$stix] = ($mar + 1) & 0x3FFF;@read
 
 // *************************************************************************************************
 //									Index Register Instructions
@@ -27,13 +23,13 @@ F0-F6 	5	"mov l,@r"		$l = $@r
 
 // ----------------------------------------------------------------------------------------------------------
 
-C7-F7,8	8 	"mov @r,m"		$mar = @hl;@read;$@r = $mbr
-F8-FE	7	"mov m,@r"		$mar = @hl;$mbr = $@r;@write
+C7-F7,8	8 	"mov @r,m"		$mar = @hl;$read();$@r = $mbr
+F8-FE	7	"mov m,@r"		$mar = @hl;$mbr = $@r;$write()
 
 // ----------------------------------------------------------------------------------------------------------
 
-06-36,8	8	"mvi @r,%1"		@fetch;$@r = $mbr
-3E 		9	"mvi m,%1"		@fetch;$mar = @hl;@write
+06-36,8	8	"mvi @r,%1"		$fetch();$@r = $mbr
+3E 		9	"mvi m,%1"		$fetch();$mar = @hl;$write()
 
 // ----------------------------------------------------------------------------------------------------------
 
@@ -44,49 +40,54 @@ F8-FE	7	"mov m,@r"		$mar = @hl;$mbr = $@r;@write
 //								Accumulator Group Instructions
 // *************************************************************************************************
 
-@add 	$mar = $a + $mbr
-@adc 	$mar = $a + $mbr + $carry
-@sub 	$mar = $a - $mbr
-@sbb 	$mar = $a - $mbr - $carry
+:function inline $add8bit() {
+:	$t16 = $a + $mbr + $carry;
+:	$a = ($t16 & 0xFF);
+:	$carry = ($t16 >> 8) & 1;
+:	$pszv = $a;	
+:}
 
-@result	$a = $mar & 0xFF;$pszv = $a;$carry = ($a & 0x100) >> 8
-@cmpres	$pszv = $mar & 0xFF;$carry = ($a & 0x100) >> 8
+:function inline $sub8bit() {
+:	$t16 = $a - $mbr - $carry;
+:	$pszv = ($t16 & 0xFF);				// Does NOT update A so can be used in CMP.
+:	$carry = ($t16 >> 8) & 1;
+:}
 
-80-86 	5 	"add @r"		$mbr = $@r;@add;@result
-87 		8 	"add m"			$mar = @hl;@read;@add;@result
-04 		8 	"adi %1"		@fetch;@add;@result
+80-86 	5 	"add @r"		$mbr = $@r;$carry = 0;$add8bit()
+87 		8 	"add m"			$mar = @hl;$carry = 0;$read();$add8bit()
+04 		8 	"adi %1"		$fetch();$carry = 0;$add8bit()
 
-88-8E 	5 	"adc @r"		$mbr = $@r;@adc;@result
-8F 		8 	"adc m"			$mar = @hl;@read;@adc;@result
-0C 		8 	"aci %1"		@fetch;@adc;@result
+88-8E 	5 	"adc @r"		$mbr = $@r;$add8bit()
+8F 		8 	"adc m"			$mar = @hl;$read();$add8bit()
+0C 		8 	"aci %1"		$fetch();$add8bit()
 
-90-96 	5 	"sub @r"		$mbr = $@r;@sub;@result
-97 		8 	"sub m"			$mar = @hl;@read;@sub;@result
-14 		8 	"sui %1"		@fetch;@sub;@result
+90-96 	5 	"sub @r"		$mbr = $@r;$carry = 0;$sub8bit();$a = $pszv
+97 		8 	"sub m"			$mar = @hl;$carry = 0;$read();$sub8bit();$a = $pszv
+14 		8 	"sui %1"		$fetch();$carry = 0;$sub8bit();$a = $pszv
 
-98-9E 	5 	"sbb @r"		$mbr = $@r;@sbb;@result
-9F 		8 	"sbb m"			$mar = @hl;@read;@sbb;@result
-1C 		8 	"sbi %1"		@fetch;@sbb;@result
+98-9E 	5 	"sbb @r"		$mbr = $@r;$sub8bit();$a = $pszv
+9F 		8 	"sbb m"			$mar = @hl;$read();$sub8bit();$a = $pszv
+1C 		8 	"sbi %1"		$fetch();$sub8bit();$a = $pszv
 
 // ----------------------------------------------------------------------------------------------------------
 
 A0-A6 	5 	"and @r"		$carry = 0;$a = $a & $@r;$pszv = $a
-A7 		8 	"and m"			$mar = @hl;@read;$carry = 0;$a = $a & $mbr;$pszv = $a
-24 		8 	"ani %1"		@fetch;$carry = 0;$a = $a & $mbr;$pszv = $a
+A7 		8 	"and m"			$mar = @hl;$read();$carry = 0;$a = $a & $mbr;$pszv = $a
+24 		8 	"ani %1"		$fetch();$carry = 0;$a = $a & $mbr;$pszv = $a
 
 A8-AE 	5 	"xor @r"		$carry = 0;$a = $a ^ $@r;$pszv = $a
-AF 		8 	"xor m"			$mar = @hl;@read;$carry = 0;$a = $a ^ $mbr;$pszv = $a
-2C 		8 	"xri %1"		@fetch;$carry = 0;$a = $a ^ $mbr;$pszv = $a
+AF 		8 	"xor m"			$mar = @hl;$read();$carry = 0;$a = $a ^ $mbr;$pszv = $a
+2C 		8 	"xri %1"		$fetch();$carry = 0;$a = $a ^ $mbr;$pszv = $a
 
 B0-B6 	5 	"or @r"			$carry = 0;$a = $a | $@r;$pszv = $a
-B7 		8 	"or m"			$mar = @hl;@read;$carry = 0;$a = $a | $mbr;$pszv = $a
-34 		8 	"ori %1"		@fetch;$carry = 0;$a = $a | $mbr;$pszv = $a
+B7 		8 	"or m"			$mar = @hl;$read();$carry = 0;$a = $a | $mbr;$pszv = $a
+34 		8 	"ori %1"		$fetch();$carry = 0;$a = $a | $mbr;$pszv = $a
 
 // ----------------------------------------------------------------------------------------------------------
 
-B8-BE 	5 	"cmp @r"		$mbr = $@r;@sub;@cmpres
-BF 		8 	"cmp m"			$mar = @hl;@read;@sub;@cmpres
-3C 		8 	"cpi %1"		@fetch;@sub;@cmpres
+B8-BE 	5 	"cmp @r"		$mbr = $@r;$carry = 0;$sub8bit()
+BF 		8 	"cmp m"			$mar = @hl;$carry = 0;$read();$sub8bit()
+3C 		8 	"cpi %1"		$fetch();$carry = 0;$sub8bit()
 
 // ----------------------------------------------------------------------------------------------------------
 
@@ -102,21 +103,41 @@ BF 		8 	"cmp m"			$mar = @hl;@read;@sub;@cmpres
 //						Program Counter and Stack Control Instructions
 // *************************************************************************************************
 
-@wfetch		@fetch;$t16 = $mbr;@fetch;$t16 = $t16 | ($mbr << 8)
-@branch 	$stack[$stix] = $t16 & 0x3FFF
-@push 		$stix = ($stix + 1) & 7
-@pull 		$stix = ($stix - 1) & 7
+:function inline $fetch() {
+:	$mar = $stack[$stix];
+:	$read();
+:	$stack[$stix] = ($mar + 1) & 0x3FFF;
+:}
 
-44-7C,8	11	"jmp %2"		@wfetch;@branch
-40-78,8 10 	"j@c %2"		@wfetch;if (@t) { @branch; }
+:function inline $fetch16() {
+:	$fetch();	
+:	$t16 = $mbr;
+:	$fetch();
+:	$t16 = ($t16 | ($mbr << 8)) & 0x3FFF;	
+:}
 
-46-7E,8	11 	"call %2"		@wfetch;@push;@branch
-42-7A,8 10 	"c@c %2"		@wfetch;if (@t) { @push;@branch; }
+:function inline $push() {
+: 		$stix = ($stix + 1) & 7	;
+:}
 
-07-3F,8	5 	"ret"			@pull
-03-3B,8 5 	"r@c"			if (@t) { @pull; }
+:function inline $pull() {
+: 		$stix = ($stix - 1) & 7	;
+:}
 
-05-3D,8 5 	"rst @v"		$t16 = 0x@v;@push;@branch
+:function inline $branch() {
+:	$stack[$stix] = $t16;
+:}
+
+44-7C,8	11	"jmp %2"		$fetch16();$branch()
+40-78,8 10 	"j@c %2"		$fetch16();if (@t) { $branch(); }
+
+46-7E,8	11 	"call %2"		$fetch16();$push();$branch()
+42-7A,8 10 	"c@c %2"		$fetch16();if (@t) { $push();$branch(); }
+
+07-3F,8	5 	"ret"			$pull()
+03-3B,8 5 	"r@c"			if (@t) { $pull(); }
+
+05-3D,8 5 	"rst @v"		$t16 = 0x@v;$push();$branch()
 
 // *************************************************************************************************
 //									Input/Output instructions
@@ -131,3 +152,5 @@ BF 		8 	"cmp m"			$mar = @hl;@read;@sub;@cmpres
 
 00-01 	4 	"halt"			$halt = 1
 FF 		4 	"halt"			$halt = 1
+
+
